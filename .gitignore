@@ -1,0 +1,21 @@
+node_modules/
+out/
+dist/
+dist-electron/
+
+# env files contain secrets — never commit
+.env.local
+.env.*.local
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / Agent tools
+.claude/
+.playwright-mcp/
+
+# Test artifacts
+test-*.png
+*.tsbuildinfo
