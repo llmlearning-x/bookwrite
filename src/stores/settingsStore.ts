@@ -60,8 +60,9 @@ export const useSettingsStore = create<SettingsStore>()(
           ...persisted,
           aiConfig: {
             ...DEFAULT_AI_CONFIG,
-            ...currentState.aiConfig,
             ...(persisted.aiConfig || {}),
+            // 若持久化的 apiKey 为空，回退到环境变量默认值
+            apiKey: persisted.aiConfig?.apiKey || DEFAULT_AI_CONFIG.apiKey,
           },
         } as SettingsStore
       },

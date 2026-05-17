@@ -39,12 +39,14 @@ export async function deleteBook(bookId: string): Promise<void> {
   if (error) throw error
 }
 
-let _debounceTimer: ReturnType<typeof setTimeout> | null = null
+const _timers = new Map<string, ReturnType<typeof setTimeout>>()
 
 export function scheduleSyncBook(book: Book, userId: string, onStatus: (s: SyncStatus) => void) {
-  if (_debounceTimer) clearTimeout(_debounceTimer)
+  const existing = _timers.get(book.id)
+  if (existing) clearTimeout(existing)
   onStatus('idle')
-  _debounceTimer = setTimeout(async () => {
+  const timer = setTimeout(async () => {
+    _timers.delete(book.id)
     onStatus('syncing')
     try {
       await upsertBook(book, userId)
@@ -53,4 +55,5 @@ export function scheduleSyncBook(book: Book, userId: string, onStatus: (s: SyncS
       onStatus('error')
     }
   }, 2500)
+  _timers.set(book.id, timer)
 }

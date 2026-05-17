@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useEditor, EditorContent, BubbleMenu } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -22,6 +22,9 @@ interface Props {
 
 export function RichEditor({ content, onChange, placeholder, readOnly }: Props) {
   const { editorFont, editorFontSize } = useSettingsStore()
+  // Tracks the last value we pushed into the editor externally,
+  // so we never reset content that the user is actively typing.
+  const lastSetRef = useRef<string>(content ?? '')
 
   const editor = useEditor({
     extensions: [
@@ -32,7 +35,11 @@ export function RichEditor({ content, onChange, placeholder, readOnly }: Props) 
     ],
     content,
     editable: !readOnly,
-    onUpdate: ({ editor }) => onChange(editor.getText()),
+    onUpdate: ({ editor }) => {
+      const html = editor.getHTML()
+      lastSetRef.current = html
+      onChange(html)
+    },
     editorProps: {
       attributes: {
         class: 'prose-editor',
@@ -45,8 +52,19 @@ export function RichEditor({ content, onChange, placeholder, readOnly }: Props) 
   })
 
   useEffect(() => {
-    if (editor && content !== editor.getText()) {
-      editor.commands.setContent(content || '', false)
+    if (editor && content !== lastSetRef.current) {
+      // Migrate plain-text content (written before HTML conversion) on load
+      let html = content ?? ''
+      if (html && !html.trimStart().startsWith('<')) {
+        html = html
+          .split('\n\n')
+          .map(p => p.trim())
+          .filter(p => p.length > 0)
+          .map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`)
+          .join('')
+      }
+      lastSetRef.current = html
+      editor.commands.setContent(html || '', false)
     }
   }, [content, editor])
 

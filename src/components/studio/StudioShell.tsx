@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Settings, Save, PanelLeftClose, PanelLeft, FilePlus, FolderOpen, ChevronLeft, Cloud, CloudOff, Loader2 } from 'lucide-react'
+import { Settings, Save, PanelLeftClose, PanelLeft, FilePlus, FolderOpen, ChevronLeft, Cloud, CloudOff, Loader2, BotMessageSquare } from 'lucide-react'
 import { useBookStore } from '@/stores/bookStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -17,6 +17,7 @@ const APP_VERSION = '0.1.0'
 
 export function StudioShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [agentOpen, setAgentOpen] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
   const { book, isDirty, newBook } = useBookStore()
   const { clear } = useAgentStore()
@@ -32,7 +33,7 @@ export function StudioShell() {
     if (isDirty && user) {
       updateBookInList(book, user.id)
     }
-  }, [book, isDirty])
+  }, [book, isDirty, user, updateBookInList])
 
   const handleNew = useCallback(() => {
     if (isDirty && !confirm(t.confirmNew)) return
@@ -106,6 +107,11 @@ export function StudioShell() {
               <Save size={14}/>
             </button>
           )}
+          <button onClick={() => setAgentOpen(v => !v)} className="icon-btn no-drag"
+            title={agentOpen ? '收起 AI 助手' : '展开 AI 助手'}
+            style={{ color: agentOpen ? '#37352f' : 'rgba(55,53,47,0.4)' }}>
+            <BotMessageSquare size={14}/>
+          </button>
           <button onClick={() => setShowSettings(true)} className="icon-btn no-drag" title={t.tooltipSettings}>
             <Settings size={14}/>
           </button>
@@ -128,8 +134,12 @@ export function StudioShell() {
           <ChapterSidebar />
         </aside>
         <div className="studio-main">
-          <WritingCanvas />
-          <AgentPanel />
+          <div className="studio-canvas">
+            <WritingCanvas />
+          </div>
+          <div className={`studio-agent ${agentOpen ? 'agent-visible' : 'agent-hidden'}`}>
+            <AgentPanel />
+          </div>
         </div>
       </div>
 

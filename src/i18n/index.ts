@@ -95,6 +95,7 @@ const translations = {
       { label: '润色章节',   prompt: '润色当前章节，提升语言质量' },
       { label: '生成封面',   prompt: '为这本书生成封面图片' },
       { label: '导出 Word',  prompt: '把书籍导出为 Word 文档' },
+      { label: '导出 PDF',   prompt: '把书籍导出为 PDF 文件' },
     ],
 
     /* Settings panel */
@@ -220,6 +221,7 @@ const translations = {
       { label: 'Polish',           prompt: 'Polish the current chapter to improve language quality' },
       { label: 'Generate cover',   prompt: 'Generate a cover image for this book' },
       { label: 'Export Word',      prompt: 'Export the book as a Word document' },
+      { label: 'Export PDF',       prompt: 'Export the book as a PDF file' },
     ],
 
     /* Settings panel */

@@ -14,8 +14,22 @@ import {
   promptEditContent,
   promptGenerateCoverPrompt,
   buildBookContext,
+  buildKnowledgeContext,
 } from './prompts'
-import { exportToMarkdown, exportToDocx, exportToHTML } from '@/services/export/exportService'
+import { exportToMarkdown, exportToDocx, exportToHTML, exportToPDF } from '@/services/export/exportService'
+
+function plainToHtml(text: string): string {
+  return text
+    .split('\n\n')
+    .map(p => p.trim())
+    .filter(p => p.length > 0)
+    .map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`)
+    .join('')
+}
+
+function stripHtml(html: string): string {
+  return html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
+}
 
 // ─── Tool definitions (provider-agnostic) ──────────────────────────────────
 
@@ -90,7 +104,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        format: { type: 'string', enum: ['docx', 'markdown', 'html'], description: '导出格式' },
+        format: { type: 'string', enum: ['docx', 'markdown', 'html', 'pdf'], description: '导出格式' },
       },
       required: ['format'],
     },
@@ -120,6 +134,42 @@ export const AGENT_TOOLS: AgentTool[] = [
       },
     },
   },
+  {
+    name: 'manage_character',
+    description: '添加或更新书籍人物卡。用于记录角色信息，写作时保持人物一致性。',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '人物 ID（更新时传入，新增时留空）' },
+        name: { type: 'string', description: '人物姓名' },
+        role: { type: 'string', enum: ['protagonist', 'antagonist', 'supporting', 'minor'], description: '角色定位' },
+        description: { type: 'string', description: '外貌描述' },
+        personality: { type: 'string', description: '性格特点' },
+        arc: { type: 'string', description: '人物成长弧线' },
+        firstChapter: { type: 'number', description: '首次出场章节编号' },
+      },
+      required: ['name', 'role', 'description', 'personality'],
+    },
+  },
+  {
+    name: 'update_world_note',
+    description: '添加或更新世界观笔记（地点、规则、历史、技术等设定）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '笔记 ID（更新时传入，新增时留空）' },
+        category: { type: 'string', enum: ['setting', 'rule', 'history', 'technology', 'culture', 'other'] },
+        title: { type: 'string', description: '设定名称' },
+        content: { type: 'string', description: '设定内容详情' },
+      },
+      required: ['category', 'title', 'content'],
+    },
+  },
+  {
+    name: 'write_next_chapter',
+    description: '写作下一个未完成的章节。写完后自动暂停等待用户确认，再继续下一章。',
+    parameters: { type: 'object', properties: {} },
+  },
 ]
 
 function toAnthropicTools(tools: AgentTool[]): Anthropic.Tool[] {
@@ -142,25 +192,29 @@ function toOpenAITools(tools: AgentTool[]): OpenAI.ChatCompletionTool[] {
 }
 
 const MAX_LOOPS = 10
+const CHECKPOINT_SKILLS = ['expand_idea', 'generate_outline', 'write_next_chapter']
 
-const AGENT_SYSTEM = `你是 BookWrite 的 AI 创作助手，帮助用户端到端完成书籍创作。
+const AGENT_SYSTEM = `你是 BookBuddy 的 AI 书籍创作助手，帮助用户从创意到成稿完成整本书的创作。
 
-你拥有一组强大的技能工具（skills），可以自动化完成创意扩展、大纲生成、章节写作、内容编辑、封面设计、书籍导出等任务。
+你拥有强大的技能工具集，可以完成：创意扩展、大纲生成、章节写作、人物管理、世界观设定、封面生成、书籍导出等全流程任务。
 
-工作原则：
-- 主动使用工具完成任务，不要只给建议
-- 每完成一个关键步骤后，停下来向用户汇报结果并等待用户确认，再进行下一步
-- 使用中文回复，简洁清晰
-- 在工具执行前简要告知用户正在做什么
-- 完成后总结结果
+【核心原则：人在环中】
+- 每完成一个关键步骤，必须停下来向用户展示结果、等待确认，再继续下一步
+- 不要连续执行多个重大步骤，把选择权交给用户
+- 章节写作使用 write_next_chapter（每次写一章，写完暂停等待用户确认继续）
+- 使用中文回复，简洁清晰；在执行前简要说明将要做什么
 
-当用户说"帮我写一本书关于X"时，应该：
-1. 先调用 expand_idea 扩展创意
-2. 完成后向用户展示结果，等待用户确认或修改意见
-3. 用户确认后，调用 generate_outline 生成大纲
-4. 完成后向用户展示大纲概览，等待用户确认
-5. 用户确认后，调用 write_all_chapters 批量写作
-6. 不要跳过中间步骤，不要在用户未确认时自动执行下一步`
+【完整书籍创作流程】
+1. expand_idea → 展示结果 → 等待用户确认/修改
+2. manage_character（提炼主要人物卡）+ update_world_note（关键设定）
+3. generate_outline → 展示大纲 → 等待确认
+4. 逐章写作：反复调用 write_next_chapter，每章写完向用户汇报并等待确认继续
+5. 可随时 edit_chapter 润色、generate_cover 生成封面、export_book 导出
+
+【人物与世界观】
+- 在生成大纲后，主动提取并创建主要人物卡（manage_character）和关键世界观设定（update_world_note）
+- 写作时系统会自动将人物卡注入上下文，确保人物一致性
+- 如用户提到新角色或新设定，立即调用工具记录`
 
 // ─── Skill labels ──────────────────────────────────────────────────────────
 
@@ -169,11 +223,14 @@ const SKILL_LABELS: Record<string, string> = {
   generate_outline: '生成大纲',
   write_chapter: '写作章节',
   write_all_chapters: '批量写作',
+  write_next_chapter: '写作下一章',
   edit_chapter: 'AI 编辑',
   generate_cover: '生成封面',
   export_book: '导出书籍',
   navigate_chapter: '切换章节',
   update_book_info: '更新信息',
+  manage_character: '更新人物卡',
+  update_world_note: '更新世界观',
 }
 
 // ─── Skill executor ────────────────────────────────────────────────────────
@@ -187,7 +244,7 @@ async function executeSkill(
   onStream: OnChapterStream,
   signal?: AbortSignal
 ): Promise<string> {
-  const { book, updateIdea, updateMetadata, setOutline, updateChapter, setActiveChapter, updateVisuals } = useBookStore.getState()
+  const { book, updateIdea, updateMetadata, setOutline, updateChapter, setActiveChapter, updateVisuals, upsertCharacter, upsertWorldNote } = useBookStore.getState()
 
   switch (name) {
     case 'expand_idea': {
@@ -237,12 +294,16 @@ async function executeSkill(
       updateChapter(chapterId, { status: 'writing' })
       setActiveChapter(chapterId)
       const chapterIndex = useBookStore.getState().book.outline.findIndex((c) => c.id === chapterId)
-      const prev = chapterIndex > 0 ? useBookStore.getState().book.outline[chapterIndex - 1] : undefined
+      // 传入所有已写完章节的摘要，供一致性参考
+      const previousSummaries = useBookStore.getState().book.outline
+        .slice(0, chapterIndex)
+        .filter(c => c.content)
+        .map(c => ({ number: c.number, title: c.title, summary: c.summary }))
       let full = ''
       await streamCompletion(
         config,
         SYSTEM_BOOK_AUTHOR,
-        promptWriteChapter(useBookStore.getState().book, chapter, prev?.summary),
+        promptWriteChapter(useBookStore.getState().book, chapter, previousSummaries),
         ({ text, done }) => {
           if (!done) {
             full += text
@@ -267,7 +328,7 @@ async function executeSkill(
       }
 
       const wc = full.replace(/\s/g, '').length
-      updateChapter(chapterId, { content: full, wordCount: wc, status: 'draft' })
+      updateChapter(chapterId, { content: plainToHtml(full), wordCount: wc, status: 'draft' })
       return `第 ${chapter.number} 章《${chapter.title}》写作完成，共 ${wc} 字`
     }
 
@@ -290,7 +351,7 @@ async function executeSkill(
       await streamCompletion(
         config,
         SYSTEM_BOOK_EDITOR,
-        promptEditContent(chapter.content, input.mode as string, buildBookContext(useBookStore.getState().book)),
+        promptEditContent(stripHtml(chapter.content), input.mode as string, buildBookContext(useBookStore.getState().book)),
         ({ text, done }) => {
           if (!done) {
             full += text
@@ -302,7 +363,7 @@ async function executeSkill(
         signal
       )
       const wc = full.replace(/\s/g, '').length
-      updateChapter(chapterId, { content: full, wordCount: wc, status: 'revised' })
+      updateChapter(chapterId, { content: plainToHtml(full), wordCount: wc, status: 'revised' })
       return `第 ${chapter.number} 章编辑完成（${input.mode}），共 ${wc} 字`
     }
 
@@ -341,7 +402,69 @@ async function executeSkill(
         triggerDownload(html, `${base}.html`, 'text/html')
         return 'HTML 文件已导出'
       }
+      if (format === 'pdf') {
+        type ElectronAPI = {
+          fs?: { showSaveDialog?: (opts: unknown) => Promise<string | null> }
+          pdf?: { export: (buffer: ArrayBuffer, path: string) => Promise<{ ok: boolean }> }
+          shell?: { openPath: (p: string) => void }
+        }
+        // Generate PDF first so user doesn't wait after picking a path
+        const pdfBytes = await exportToPDF(bookData)
+        const api = (window as Window & { electronAPI?: ElectronAPI }).electronAPI
+        if (api?.fs?.showSaveDialog) {
+          const savePath = await api.fs.showSaveDialog({
+            title: '保存 PDF',
+            defaultPath: `${base}.pdf`,
+            filters: [{ name: 'PDF 文件', extensions: ['pdf'] }],
+          })
+          if (savePath && api.pdf?.export) {
+            await api.pdf.export(pdfBytes.buffer as ArrayBuffer, savePath)
+            api.shell?.openPath(savePath)
+            return `PDF 已导出至：${savePath}`
+          }
+          if (!savePath) {
+            // User cancelled native dialog — fall back to browser download
+            triggerDownload(pdfBytes.buffer as ArrayBuffer, `${base}.pdf`, 'application/pdf')
+            return 'PDF 已通过浏览器下载'
+          }
+        }
+        triggerDownload(pdfBytes.buffer as ArrayBuffer, `${base}.pdf`, 'application/pdf')
+        return 'PDF 已导出'
+      }
       return '未知格式'
+    }
+
+    case 'write_next_chapter': {
+      const next = useBookStore.getState().book.outline.find(c => !c.content)
+      if (!next) return '所有章节已写作完成！'
+      const result = await executeSkill('write_chapter', { chapter_id: next.id }, config, onStream, signal)
+      const remaining = useBookStore.getState().book.outline.filter(c => !c.content).length
+      return result + (remaining > 0 ? `\n\n还剩 ${remaining} 章未写，点击「继续」写下一章。` : '\n\n全部章节已写作完成！')
+    }
+
+    case 'manage_character': {
+      const char = {
+        id: (input.id as string) || crypto.randomUUID(),
+        name: input.name as string,
+        role: input.role as 'protagonist' | 'antagonist' | 'supporting' | 'minor',
+        description: input.description as string,
+        personality: input.personality as string,
+        arc: (input.arc as string) || '',
+        firstChapter: input.firstChapter as number | undefined,
+      }
+      upsertCharacter(char)
+      return `人物卡已更新：${char.name}（${char.role}）`
+    }
+
+    case 'update_world_note': {
+      const note = {
+        id: (input.id as string) || crypto.randomUUID(),
+        category: input.category as 'setting' | 'rule' | 'history' | 'technology' | 'culture' | 'other',
+        title: input.title as string,
+        content: input.content as string,
+      }
+      upsertWorldNote(note)
+      return `世界观笔记已更新：${note.title}`
     }
 
     case 'navigate_chapter': {
@@ -388,24 +511,25 @@ async function runAgentAnthropic(
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
   onStream: OnChapterStream,
   assistantMsgId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  resumeState?: { messages: Anthropic.MessageParam[]; loopCount: number; assistantText: string }
 ) {
-  const { setThinking, startSkill, finishSkill, failSkill, updateAssistantMessage, updateAssistantReasoning } = useAgentStore.getState()
+  const { setThinking, startSkill, finishSkill, failSkill, updateAssistantMessage } = useAgentStore.getState()
 
   const book = useBookStore.getState().book
   const bookSummary = book.idea.title
     ? `当前书籍：《${book.idea.title}》，${book.idea.genre}，${book.outline.length} 章，已写 ${book.outline.filter((c) => c.content).length} 章`
     : '当前没有书籍项目'
 
-  const messages: Anthropic.MessageParam[] = [
+  const messages: Anthropic.MessageParam[] = resumeState?.messages ?? [
     ...history.slice(-10).map((h) => ({ role: h.role, content: h.content })),
     { role: 'user', content: `[书籍状态：${bookSummary}]\n\n${userMessage}` },
   ]
 
   const client = new Anthropic({ apiKey: config.apiKey, dangerouslyAllowBrowser: true })
 
-  let assistantText = ''
-  let loopCount = 0
+  let assistantText = resumeState?.assistantText ?? ''
+  let loopCount = resumeState?.loopCount ?? 0
 
   while (loopCount < MAX_LOOPS) {
     if (signal?.aborted) break
@@ -441,8 +565,18 @@ async function runAgentAnthropic(
 
     // Execute all tool calls
     const toolResults: Anthropic.ToolResultBlockParam[] = []
+    let hitCheckpoint: string | false = false
 
     for (const toolBlock of toolUseBlocks) {
+      if (hitCheckpoint) {
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolBlock.id,
+          content: '已暂停：需要用户确认后才能继续执行此步骤',
+        })
+        continue
+      }
+
       const skillId = crypto.randomUUID()
       startSkill({
         id: skillId,
@@ -451,7 +585,6 @@ async function runAgentAnthropic(
         status: 'running',
         input: toolBlock.input as Record<string, unknown>,
       })
-      setThinking(false)
 
       let result: string
       try {
@@ -473,11 +606,29 @@ async function runAgentAnthropic(
         tool_use_id: toolBlock.id,
         content: result,
       })
+
+      if (CHECKPOINT_SKILLS.includes(toolBlock.name)) {
+        hitCheckpoint = toolBlock.name
+      }
     }
 
     // Continue the loop with tool results
     messages.push({ role: 'assistant', content: response.content })
     messages.push({ role: 'user', content: toolResults })
+
+    if (hitCheckpoint) {
+      const hasMoreChapters = hitCheckpoint === 'write_next_chapter' &&
+        useBookStore.getState().book.outline.some(c => !c.content)
+      useAgentStore.getState().setCheckpoint({
+        autoResend: hasMoreChapters ? '继续写下一章' : undefined,
+        resume: () => runAgentAnthropic(
+          '', config, history, onStream, assistantMsgId, signal,
+          { messages: [...messages], loopCount: loopCount + 1, assistantText }
+        )
+      })
+      setThinking(false)
+      return
+    }
 
     if (response.stop_reason === 'end_turn') break
   }
@@ -493,7 +644,8 @@ async function runAgentOpenAI(
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
   onStream: OnChapterStream,
   assistantMsgId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  resumeState?: { messages: OpenAI.ChatCompletionMessageParam[]; loopCount: number; assistantText: string }
 ) {
   const { setThinking, startSkill, finishSkill, failSkill, updateAssistantMessage } = useAgentStore.getState()
 
@@ -513,14 +665,14 @@ async function runAgentOpenAI(
 
   const openaiTools = toOpenAITools(AGENT_TOOLS)
 
-  const messages: OpenAI.ChatCompletionMessageParam[] = [
+  const messages: OpenAI.ChatCompletionMessageParam[] = resumeState?.messages ?? [
     { role: 'system', content: AGENT_SYSTEM },
     ...history.slice(-10).map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content })),
     { role: 'user', content: `[书籍状态：${bookSummary}]\n\n${userMessage}` },
   ]
 
-  let assistantText = ''
-  let loopCount = 0
+  let assistantText = resumeState?.assistantText ?? ''
+  let loopCount = resumeState?.loopCount ?? 0
 
   while (loopCount < MAX_LOOPS) {
     if (signal?.aborted) break
@@ -565,9 +717,19 @@ async function runAgentOpenAI(
 
     // Execute all tool calls
     const toolResults: OpenAI.ChatCompletionToolMessageParam[] = []
+    let hitCheckpoint: string | false = false
 
     for (const toolCall of message.tool_calls) {
       if (toolCall.type !== 'function') continue
+
+      if (hitCheckpoint) {
+        toolResults.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: '已暂停：需要用户确认后才能继续执行此步骤',
+        })
+        continue
+      }
 
       let parsedInput: Record<string, unknown>
       try {
@@ -584,7 +746,6 @@ async function runAgentOpenAI(
         status: 'running',
         input: parsedInput,
       })
-      setThinking(false)
 
       let result: string
       try {
@@ -600,6 +761,10 @@ async function runAgentOpenAI(
         tool_call_id: toolCall.id,
         content: result,
       })
+
+      if (CHECKPOINT_SKILLS.includes(toolCall.function.name)) {
+        hitCheckpoint = toolCall.function.name
+      }
     }
 
     // Continue the loop with tool results
@@ -609,6 +774,20 @@ async function runAgentOpenAI(
       tool_calls: message.tool_calls,
     } as OpenAI.ChatCompletionAssistantMessageParam)
     messages.push(...toolResults)
+
+    if (hitCheckpoint) {
+      const hasMoreChapters = hitCheckpoint === 'write_next_chapter' &&
+        useBookStore.getState().book.outline.some(c => !c.content)
+      useAgentStore.getState().setCheckpoint({
+        autoResend: hasMoreChapters ? '继续写下一章' : undefined,
+        resume: () => runAgentOpenAI(
+          '', config, history, onStream, assistantMsgId, signal,
+          { messages: [...messages], loopCount: loopCount + 1, assistantText }
+        )
+      })
+      setThinking(false)
+      return
+    }
   }
 
   setThinking(false)

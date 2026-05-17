@@ -7,7 +7,9 @@ import { PixelWriterScene, PixelBook } from './PixelArt'
 import { getT } from '@/i18n'
 
 let _push: ((id: string, text: string) => void) | null = null
+let _clear: (() => void) | null = null
 export function setCanvasStream(id: string, text: string) { _push?.(id, text) }
+export function clearCanvasStream() { _clear?.() }
 
 const FONTS: Record<string, string> = {
   sans:  'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
@@ -24,7 +26,8 @@ export function WritingCanvas() {
 
   useEffect(() => {
     _push = (id, text) => setStream({ id, text })
-    return () => { _push = null }
+    _clear = () => setStream(null)
+    return () => { _push = null; _clear = null }
   }, [])
 
   const t = getT(locale)
@@ -177,7 +180,7 @@ export function WritingCanvas() {
         ) : (
           <RichEditor
             content={activeChapter.content}
-            onChange={text => updateChapter(activeChapter.id, { content: text, wordCount: text.replace(/\s/g, '').length })}
+            onChange={html => updateChapter(activeChapter.id, { content: html, wordCount: html.replace(/<[^>]+>/g, '').replace(/\s/g, '').length })}
             placeholder={t.chapterPlaceholder(activeChapter.number, activeChapter.title)}
           />
         )}

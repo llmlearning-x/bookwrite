@@ -36,6 +36,30 @@ export interface Chapter {
   coverImage?: string // base64 or file path
 }
 
+export type CharacterRole = 'protagonist' | 'antagonist' | 'supporting' | 'minor'
+
+export interface Character {
+  id: string
+  name: string
+  role: CharacterRole
+  description: string   // 外貌
+  personality: string   // 性格
+  arc: string           // 成长弧线
+  firstChapter?: number // 首次出场章节
+}
+
+export interface WorldNote {
+  id: string
+  category: 'setting' | 'rule' | 'history' | 'technology' | 'culture' | 'other'
+  title: string
+  content: string
+}
+
+export interface BookKnowledge {
+  characters: Character[]
+  worldNotes: WorldNote[]
+}
+
 export interface BookVisuals {
   coverImage?: string
   coverPrompt?: string
@@ -68,5 +92,6 @@ export interface Book {
   outline: Chapter[]
   metadata: BookMetadata
   visuals: BookVisuals
+  knowledge: BookKnowledge
   filePath?: string
 }

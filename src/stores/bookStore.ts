@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Book, Chapter, ChapterSection } from '@/types/book'
+import type { Book, Chapter, ChapterSection, Character, WorldNote } from '@/types/book'
 
 function newBook(): Book {
   return {
@@ -23,6 +23,7 @@ function newBook(): Book {
       language: 'zh',
     },
     visuals: { illustrations: [] },
+    knowledge: { characters: [], worldNotes: [] },
   }
 }
 
@@ -40,6 +41,11 @@ interface BookStore {
   updateChapter: (chapterId: string, partial: Partial<Chapter>) => void
   updateSection: (chapterId: string, sectionId: string, partial: Partial<ChapterSection>) => void
   updateVisuals: (partial: Partial<Book['visuals']>) => void
+  // Knowledge base
+  upsertCharacter: (char: Character) => void
+  removeCharacter: (id: string) => void
+  upsertWorldNote: (note: WorldNote) => void
+  removeWorldNote: (id: string) => void
   setActiveChapter: (id: string | null) => void
   setActiveSection: (id: string | null) => void
   markSaved: () => void
@@ -106,6 +112,54 @@ export const useBookStore = create<BookStore>((set, get) => ({
     },
     isDirty: true,
   })),
+
+  upsertCharacter: (char) => set((s) => {
+    const knowledge = s.book.knowledge ?? { characters: [], worldNotes: [] }
+    const existing = knowledge.characters.findIndex(c => c.id === char.id)
+    const characters = existing >= 0
+      ? knowledge.characters.map(c => c.id === char.id ? char : c)
+      : [...knowledge.characters, char]
+    return {
+      book: { ...s.book, knowledge: { ...knowledge, characters }, updatedAt: new Date().toISOString() },
+      isDirty: true,
+    }
+  }),
+
+  removeCharacter: (id) => set((s) => {
+    const knowledge = s.book.knowledge ?? { characters: [], worldNotes: [] }
+    return {
+      book: {
+        ...s.book,
+        knowledge: { ...knowledge, characters: knowledge.characters.filter(c => c.id !== id) },
+        updatedAt: new Date().toISOString(),
+      },
+      isDirty: true,
+    }
+  }),
+
+  upsertWorldNote: (note) => set((s) => {
+    const knowledge = s.book.knowledge ?? { characters: [], worldNotes: [] }
+    const existing = knowledge.worldNotes.findIndex(n => n.id === note.id)
+    const worldNotes = existing >= 0
+      ? knowledge.worldNotes.map(n => n.id === note.id ? note : n)
+      : [...knowledge.worldNotes, note]
+    return {
+      book: { ...s.book, knowledge: { ...knowledge, worldNotes }, updatedAt: new Date().toISOString() },
+      isDirty: true,
+    }
+  }),
+
+  removeWorldNote: (id) => set((s) => {
+    const knowledge = s.book.knowledge ?? { characters: [], worldNotes: [] }
+    return {
+      book: {
+        ...s.book,
+        knowledge: { ...knowledge, worldNotes: knowledge.worldNotes.filter(n => n.id !== id) },
+        updatedAt: new Date().toISOString(),
+      },
+      isDirty: true,
+    }
+  }),
 
   setActiveChapter: (id) => set({ activeChapterId: id }),
   setActiveSection: (id) => set({ activeSectionId: id }),

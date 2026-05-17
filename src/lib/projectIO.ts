@@ -14,6 +14,10 @@ declare global {
       }
       shell: { openPath: (path: string) => Promise<void> }
       app: { getVersion: () => Promise<string> }
+      pdf?: {
+        export: (buffer: ArrayBuffer, savePath: string) => Promise<{ ok: boolean }>
+        print: (html: string) => Promise<Buffer>
+      }
     }
   }
 }
@@ -80,7 +84,7 @@ export async function openProject(): Promise<boolean> {
       if (!data) return false
     }
     const book: Book = JSON.parse(data)
-    useBookStore.getState().setBook(book)
+    useBookStore.getState().setBook({ ...book, knowledge: book.knowledge ?? { characters: [], worldNotes: [] } })
     return true
   } catch (e) {
     console.error('Open failed:', e)

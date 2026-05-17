@@ -1,4 +1,4 @@
-import type { Book, BookIdea, Chapter } from '@/types/book'
+import type { Book, BookIdea, Chapter, BookKnowledge } from '@/types/book'
 
 export const SYSTEM_BOOK_AUTHOR = `你是一位经验丰富的中文书籍作者和编辑，擅长各类题材。
 你创作引人入胜、结构严谨、打动读者的内容。
@@ -66,19 +66,43 @@ export function promptGenerateOutline(idea: BookIdea): string {
 请根据类型和长度创建 8-15 章。只返回有效的 JSON。`
 }
 
+export function buildKnowledgeContext(knowledge: BookKnowledge): string {
+  const parts: string[] = []
+
+  if (knowledge.characters.length > 0) {
+    const charLines = knowledge.characters.map(c =>
+      `  - ${c.name}（${c.role}）：${c.description}；性格：${c.personality}${c.arc ? `；弧线：${c.arc}` : ''}`
+    ).join('\n')
+    parts.push(`人物表：\n${charLines}`)
+  }
+
+  if (knowledge.worldNotes.length > 0) {
+    const noteLines = knowledge.worldNotes.map(n =>
+      `  - [${n.category}] ${n.title}：${n.content}`
+    ).join('\n')
+    parts.push(`世界观设定：\n${noteLines}`)
+  }
+
+  return parts.length > 0 ? parts.join('\n\n') : ''
+}
+
 export function promptWriteChapter(
   book: Book,
   chapter: Chapter,
-  previousChapterSummary?: string
+  previousSummaries?: Array<{ number: number; title: string; summary: string }>
 ): string {
   const bookCtx = buildBookContext(book)
   const sections = chapter.sections.map(s => `- ${s.title}：${s.summary}`).join('\n')
-  const prevCtx = previousChapterSummary
-    ? `\n前一章概要：${previousChapterSummary}`
+  const knowledgeCtx = buildKnowledgeContext(book.knowledge)
+
+  const prevCtx = previousSummaries && previousSummaries.length > 0
+    ? `\n已写章节概要（保持情节连贯）：\n${previousSummaries.map(c =>
+        `  第${c.number}章《${c.title}》：${c.summary}`
+      ).join('\n')}`
     : ''
 
   return `${bookCtx}
-${prevCtx}
+${knowledgeCtx ? '\n' + knowledgeCtx : ''}${prevCtx}
 
 现在请撰写第 ${chapter.number} 章："${chapter.title}"
 本章概要：${chapter.summary}
@@ -92,9 +116,10 @@ ${sections}
 格式要求（必须遵守）：
 1. 用空行分隔段落，每段之间必须有一个空行
 2. 禁止使用 markdown 格式（如 **粗体**、*斜体*、# 标题、- 列表等）
-3. 每章内容必须有清晰的起承转合，严禁重复同样的句子或段落
-4. 直接从正文开始（不需要"第X章"标题）
-5. 所有内容必须使用中文`
+3. 确保人物行为、外貌、关系与人物表保持一致
+4. 每章内容必须有清晰的起承转合，严禁重复同样的句子或段落
+5. 直接从正文开始（不需要"第X章"标题）
+6. 所有内容必须使用中文`
 }
 
 export function promptEditContent(

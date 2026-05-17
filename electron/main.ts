@@ -74,3 +74,28 @@ ipcMain.handle('shell:open-path', async (_, path: string) => {
 })
 
 ipcMain.handle('app:get-version', () => app.getVersion())
+
+ipcMain.handle('pdf:export', async (_, buffer: ArrayBuffer, savePath: string) => {
+  await writeFile(savePath, Buffer.from(buffer))
+  return { ok: true }
+})
+
+ipcMain.handle('pdf:print', async (_, html: string) => {
+  const win = new BrowserWindow({
+    show: false,
+    width: 794,
+    height: 1123,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  })
+  const encoded = 'data:text/html;charset=utf-8,' + encodeURIComponent(html)
+  await win.loadURL(encoded)
+  // Give Chromium time to lay out and load system fonts
+  await new Promise(r => setTimeout(r, 800))
+  const data = await win.webContents.printToPDF({
+    printBackground: true,
+    pageSize: 'A4',
+    margins: { marginType: 'custom', top: 0.98, bottom: 0.98, left: 0.79, right: 0.79 },
+  })
+  win.destroy()
+  return data
+})

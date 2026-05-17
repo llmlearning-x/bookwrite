@@ -20,6 +20,7 @@ function newEmptyBook(): Book {
     outline: [],
     metadata: { author: '', year: new Date().getFullYear(), language: 'zh' },
     visuals: { illustrations: [] },
+    knowledge: { characters: [], worldNotes: [] },
   }
 }
 
@@ -49,7 +50,7 @@ export function BookLibrary() {
   }
 
   const handleOpen = (book: Book) => {
-    setBook(book)
+    setBook({ ...book, knowledge: book.knowledge ?? { characters: [], worldNotes: [] } })
     openBook(book.id)
   }
 
